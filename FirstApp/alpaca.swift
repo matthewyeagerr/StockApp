@@ -15,8 +15,8 @@ class AlpacaAPI: ObservableObject {
     @Published var latestPrice: Double?
     @Published var positions: [Position] = []
 
-    private let apiKey = "PKI8CTPYSJCSYQMWQO3O"
-    private let apiSecret = "abt12oNpdtGU1fs2SQ1bACReT5JH8cwMMIkpKN8g"
+    private let apiKey = "enter your api"
+    private let apiSecret = "enter your api"
     private let paperBaseURL = "https://paper-api.alpaca.markets"
     private let dataBaseURL = "https://data.alpaca.markets"
 
