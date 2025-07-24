@@ -1,242 +1,124 @@
 import SwiftUI
 
-@main
-struct StockPortfolioApp: App {
-    var body: some Scene {
-        WindowGroup {
-            PortfolioView()
-        }
-    }
-}
+struct ContentView: View {
+    @StateObject private var api = AlpacaAPI()
+    @State private var orderTicker: String = ""
+    @State private var orderQty: String = "1"
+    @State private var orderSide: String = "buy" // or "sell"
 
-// MARK: - Model
-struct Stock: Identifiable, Codable {
-    var id: UUID = UUID()
-    var symbol: String
-    var shares: Double
-    var purchasePrice: Double
-}
-
-// MARK: - ViewModel
-class PortfolioViewModel: ObservableObject {
-    @Published var stocks: [Stock] = [] {
-        didSet { save() }
-    }
-    @Published var cashBalance: Double = 0 {
-        didSet { save() }
-    }
-
-    var portfolioValue: Double {
-        let stockValue = stocks.reduce(0) { $0 + ($1.shares * $1.purchasePrice) }
-        return cashBalance + stockValue
-    }
-
-    init() {
-        load()
-    }
-
-    func setStartingBalance(_ amount: Double) {
-        if stocks.isEmpty {
-            cashBalance = amount
-        }
-    }
-
-    func addStock(symbol: String, shares: Double, price: Double) -> Bool {
-        let cost = shares * price
-        guard cost <= cashBalance else { return false }
-        let stock = Stock(symbol: symbol.uppercased(), shares: shares, purchasePrice: price)
-        stocks.append(stock)
-        cashBalance -= cost
-        return true
-    }
-
-    func sellStock(stock: Stock, sharesToSell: Double) {
-        guard let index = stocks.firstIndex(where: { $0.id == stock.id }) else { return }
-        let availableShares = stocks[index].shares
-        let actualSharesToSell = min(availableShares, sharesToSell)
-        let saleValue = actualSharesToSell * stocks[index].purchasePrice
-
-        if actualSharesToSell >= stocks[index].shares {
-            cashBalance += saleValue
-            stocks.remove(at: index)
-        } else {
-            stocks[index].shares -= actualSharesToSell
-            cashBalance += saleValue
-        }
-    }
-
-    func save() {
-        if let encoded = try? JSONEncoder().encode(stocks) {
-            UserDefaults.standard.set(encoded, forKey: "portfolio")
-        }
-        UserDefaults.standard.set(cashBalance, forKey: "cashBalance")
-    }
-
-    func load() {
-        if let saved = UserDefaults.standard.data(forKey: "portfolio"),
-           let decoded = try? JSONDecoder().decode([Stock].self, from: saved) {
-            stocks = decoded
-        }
-        if UserDefaults.standard.object(forKey: "cashBalance") != nil{
-            cashBalance = UserDefaults.standard.double(forKey: "cashBalance")
-        }
-    }
-}
-
-// MARK: - View
-struct PortfolioView: View {
-    @StateObject private var viewModel = PortfolioViewModel()
-    @State private var symbol = ""
-    @State private var shares = ""
-    @State private var purchasePrice = ""
-    @State private var startingBalance = ""
-    @State private var sellShares = ""
-    @State private var alertMessage: String?
-    
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    
-                    Image("Logo")
-                        .resizable()
-                        .frame(width: 170, height: 60)
-                        .padding()
-                    
-                    // Header
-                    VStack(spacing: 5) {
-                        Text("Portfolio Value: $\(viewModel.portfolioValue, specifier: "%.2f")")
+            VStack(spacing: 20) {
+                Text("📈 Your Portfolio")
+                    .font(.largeTitle)
+                    .bold()
+
+                VStack(spacing: 10) {
+                    Text("💰 Account Value")
+                        .font(.headline)
+
+                    if let value = api.portfolioValue {
+                        Text("$\(String(format: "%.2f", value))")
                             .font(.title)
                             .bold()
-                        Text("Cash: $\(viewModel.cashBalance, specifier: "%.2f")")
-                            .foregroundColor(.secondary)
+                    } else {
+                        ProgressView("Loading account value...")
                     }
+                }
 
-                    // Starting Balance
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Set Starting Balance")
-                            .font(.headline)
-                        HStack {
-                            TextField("Amount", text: $startingBalance)
-                                .keyboardType(.decimalPad)
-                                .textFieldStyle(RoundedBorderTextFieldStyle())
-                            Button("Set") {
-                                if let amount = Double(startingBalance) {
-                                    viewModel.setStartingBalance(amount)
-                                    startingBalance = ""
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                    }
-                    .padding()
+                Divider()
 
-                    Divider()
+                Text(" Trade")
+                    .font(.headline)
 
-                    // BUY SECTION
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Buy Stock")
-                            .font(.headline)
+                TextField("Enter ticker", text: $orderTicker)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
+                    .autocapitalization(.allCharacters)
+                    .disableAutocorrection(true)
 
-                        TextField("Symbol (e.g., AAPL)", text: $symbol)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                        TextField("Shares", text: $shares)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                        TextField("Purchase Price", text: $purchasePrice)
-                            .keyboardType(.decimalPad)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                TextField("Quantity", text: $orderQty)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(RoundedBorderTextFieldStyle())
 
-                        Button(action: {
-                            guard let sharesVal = Double(shares),
-                                  let priceVal = Double(purchasePrice),
-                                  !symbol.isEmpty else {
-                                alertMessage = "Please enter all fields correctly."
-                                return
-                            }
-
-                            let success = viewModel.addStock(symbol: symbol, shares: sharesVal, price: priceVal)
-                            if success {
-                                symbol = ""
-                                shares = ""
-                                purchasePrice = ""
-                            } else {
-                                alertMessage = "Not enough cash to complete purchase."
-                            }
-                        }) {
-                            HStack {
-                                Image(systemName: "cart.badge.plus")
-                                Text("Buy")
-                            }
-                            .frame(maxWidth: .infinity)
+                HStack(spacing: 20) {
+                    Button(action: {
+                        orderSide = "buy"
+                        api.placeOrder(ticker: orderTicker.uppercased(), qty: orderQty, side: orderSide)
+                    }) {
+                        Label("Buy", systemImage: "arrow.up.circle.fill")
                             .padding()
-                            .background(Color.blue)
+                            .frame(maxWidth: .infinity)
+                            .background(Color.green)
                             .foregroundColor(.white)
                             .cornerRadius(10)
-                        }
                     }
-                    .padding()
 
-                    Divider()
+                    Button(action: {
+                        orderSide = "sell"
+                        api.placeOrder(ticker: orderTicker.uppercased(), qty: orderQty, side: orderSide)
+                    }) {
+                        Label("Sell", systemImage: "arrow.down.circle.fill")
+                            .padding()
+                            .frame(maxWidth: .infinity)
+                            .background(Color.red)
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+                }
 
-                    // POSITIONS
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your Stocks")
-                            .font(.headline)
+                Text("📋 Positions")
+                    .font(.headline)
 
-                        if viewModel.stocks.isEmpty {
-                            Text("No holdings yet.")
-                                .foregroundColor(.gray)
-                        } else {
-                            ForEach(viewModel.stocks) { stock in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    HStack {
-                                        Text(stock.symbol)
-                                            .font(.headline)
-                                        Spacer()
-                                        Text("\(stock.shares, specifier: "%.2f") shares @ $\(stock.purchasePrice, specifier: "%.2f")")
-                                    }
-
-                                    HStack {
-                                        TextField("Shares to sell", text: $sellShares)
-                                            .keyboardType(.decimalPad)
-                                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                                            .frame(width: 120)
-
-                                        Button("Sell") {
-                                            if let sellQty = Double(sellShares) {
-                                                viewModel.sellStock(stock: stock, sharesToSell: sellQty)
-                                                sellShares = ""
-                                            }
-                                        }
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 5)
-                                        .background(Color.red)
-                                        .foregroundColor(.white)
-                                        .cornerRadius(8)
-                                    }
-                                }
-                                .padding()
-                                .background(Color(UIColor.systemGray6))
-                                .cornerRadius(12)
+                if api.positions.isEmpty {
+                    Text("No open positions")
+                        .foregroundColor(.gray)
+                        .padding()
+                } else {
+                    List(api.positions) { position in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(position.symbol)
+                                .font(.headline)
+                            HStack {
+                                Text("Qty: \(position.qty)")
+                                Spacer()
+                                Text("Avg Price: $\(position.avgEntryPrice)")
+                                Spacer()
+                                Text("Market Value: $\(position.marketValue)")
+                                Text("Current Price: $\(position.currentPrice)")
                             }
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
                         }
+                        .padding(.vertical, 6)
+                    }
+                    .listStyle(PlainListStyle())
+                }
+
+                Spacer()
+
+                Button(action: {
+                    api.fetchAccountValue()
+                    api.fetchPositions()
+                }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise.circle.fill")
+                        Text("Refresh Data")
+                            .bold()
                     }
                     .padding()
+                    .foregroundColor(.white)
+                    .background(Color.blue)
+                    .cornerRadius(12)
+                }
 
-                }
-                .padding()
-                .alert(item: $alertMessage) { message in
-                    Alert(title: Text("Error"), message: Text(message), dismissButton: .default(Text("OK")))
-                }
+                Spacer()
             }
-            .navigationTitle("My Portfolio")
-            .navigationBarTitleDisplayMode(.inline)
+            .padding()
+            .onAppear {
+                api.fetchAccountValue()
+                api.fetchPositions()
+            }
+            .navigationBarHidden(true)
         }
     }
-}
-
-// Enable string as Alert item
-extension String: Identifiable {
-    public var id: String { self }
 }
